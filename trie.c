@@ -32,6 +32,12 @@ int default_weight(char payload1, char payload2) {
 	return (int) payload1 < (int) payload2;
 }
 
+int default_delete(void *payload) {
+	free((char *) payload);
+
+	return 0;
+}
+
 typedef struct TrieNode {
 	void *payload;
 
@@ -79,6 +85,7 @@ struct Trie {
 	void *(*next)(void *);
 
 	int (*weight)(struct Weight, void *, void *);
+	int (*delete)(void *);
 
 	int children_option; // number of children per level
 
@@ -114,11 +121,14 @@ int major_weight(weight_param weight_obj, void *p1, void *p2) {
 		'n': for an insertion (or search), this paramater takes a function
 		of type void (*)(void *) and gives the next value in the data type (
 		linked list, char *, etc.) -- will set to default (char *) if not inputted
+		'd': use for deleting values during destruction or delete
 
 		param will look something like:
 			"-w -pc", int (*weight)(char, char)
 		or:
 			"-w -pv", int (*weight)(void *, void *)
+		or:
+			"-pc-w-n-d", int (*weight)(char, char), 
 */
 trie_t *trie_create(char *param, ...) {
 	trie_t *new_trie = malloc(sizeof(trie_t));
@@ -132,8 +142,9 @@ trie_t *trie_create(char *param, ...) {
 	new_trie->children_option = 0;
 	new_trie->root_node = NULL;
 
-	new_trie->next = NULL;
+	new_trie->next = default_next;
 	new_trie->weight = major_weight;
+	new_trie->delete = default_delete;
 
 	va_list param_detail;
 	va_start(param_detail, param);
@@ -164,13 +175,13 @@ trie_t *trie_create(char *param, ...) {
 				weight_scheme.heavy_weight = va_arg(param_detail, int (*)(void *, void *));
 		} else if (param[find_p + 1] == 'n') {
 			new_trie->next = va_arg(param_detail, void *(*)(void *));
+		} else if (param[find_p + 1] == 'd') {
+			new_trie->delete = va_arg(param_detail, int (*)(void *));
 		}
 	}
 
 	if (weight_scheme.weight_option && !weight_scheme.simple_weight) // default action
 		weight_scheme.simple_weight = default_weight;
-	if (!new_trie->next) // default
-		new_trie->next = default_next;
 
 	new_trie->weight_obj = weight_scheme;
 
@@ -213,6 +224,8 @@ int trie_insertMETA(node_t *curr_node, trie_t *meta_func, void *value) {
 		if (went_full_circ && start_node == curr_node)
 			break;
 
+		went_full_circ = 1;
+
 		// check current position to see if we have found a position to insert
 		weight_ret = meta_func->weight(meta_func->weight_obj, value, curr_node->payload);
 
@@ -225,7 +238,8 @@ int trie_insertMETA(node_t *curr_node, trie_t *meta_func, void *value) {
 	if (weight_ret != 0) {
 		// insert node: right of curr_node if search_direction = 0,
 		// left of curr_node if search_direction = 1
-		node_t *new_node = node_construct(value);
+		node_t *new_node = node_construct(meta_func->weight_obj.weight_option ?
+			singleton_maker(value) : value);
 
 		inject_node(curr_node, new_node, search_direction);
 		curr_node = new_node;
@@ -259,6 +273,28 @@ int trie_insert(trie_t *trie, void *p_value) {
 	return trie_insertMETA(trie->root_node, trie, p_value);
 }
 
-int destruct(trie_t *trie) {
+int trie_destroyMETA(node_t *curr_node, trie_t *meta_func) {
+	node_t *start_node = curr_node;
 
+	do {
+		if (curr_node->children)
+			trie_destroyMETA(curr_node->children, meta_func);
+
+		if (meta_func->delete)
+			meta_func->delete(curr_node->payload);
+
+		node_t *next_node = curr_node->next;
+		free(curr_node);
+		curr_node = next_node;
+	} while (start_node != curr_node);
+
+	return 0;
+}
+
+int trie_destroy(trie_t *trie) {
+	trie_destroyMETA(trie->root_node, trie);
+
+	free(trie);
+
+	return 0;
 }
