@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+
 #include "trie.h"
 
 // default next for simple_payload
@@ -16,6 +18,15 @@ char simple_convert(void *payload) {
 	return ((char *) payload)[0];
 }
 
+char *singleton_maker(void *payload) {
+	char *singleton = malloc(sizeof(char) * 2);
+
+	singleton[0] = ((char *) payload)[0];
+	singleton[1] = '\0';
+
+	return singleton;
+}
+
 // defualt weight function
 int default_weight(char payload1, char payload2) {
 	return (int) payload1 < (int) payload2;
@@ -29,7 +40,7 @@ typedef struct TrieNode {
 
 	// circularly linked list
 	struct TrieNode *next, *prev;
-	struct TrieNode *chilren; // pointer to lower circularly linked list
+	struct TrieNode *children; // pointer to lower circularly linked list
 } node_t;
 
 node_t *node_construct(void *payload) {
@@ -42,7 +53,7 @@ node_t *node_construct(void *payload) {
 
 	// circularly link
 	new_node->next = new_node;
-	new_node->prev = new_node
+	new_node->prev = new_node;
 	new_node->children = NULL;
 
 	return new_node;
@@ -65,7 +76,7 @@ typedef struct Weight {
 
 struct Trie {
 	weight_param weight_obj;
-	void (*next)(void *);
+	void *(*next)(void *);
 
 	int (*weight)(struct Weight, void *, void *);
 
@@ -122,6 +133,7 @@ trie_t *trie_create(char *param, ...) {
 	new_trie->root_node = NULL;
 
 	new_trie->next = NULL;
+	new_trie->weight = major_weight;
 
 	va_list param_detail;
 	va_start(param_detail, param);
@@ -136,9 +148,9 @@ trie_t *trie_create(char *param, ...) {
 		if (!param[find_p + 2]) // look for value
 			return NULL; // ERROR
 
-		weight_param.weight_option = param[find_p + 2] == 'c';
+		weight_scheme.weight_option = param[find_p + 2] == 'c';
 	} else
-		weight_param.weight_option = 1;
+		weight_scheme.weight_option = 1;
 
 	// check for other parameters
 	for (find_p = 0; param[find_p + 1]; find_p++) {
@@ -146,19 +158,21 @@ trie_t *trie_create(char *param, ...) {
 			continue;
 
 		if (param[find_p + 1] == 'w') {
-			if (weight_param.weight_option)
-				weight_param.simple_weight = va_arg(param_detail, int (*)(char, char));
+			if (weight_scheme.weight_option)
+				weight_scheme.simple_weight = va_arg(param_detail, int (*)(char, char));
 			else
-				weight_param.heavy_weight = va_arg(param_detail, int (*)(void *, void *));
+				weight_scheme.heavy_weight = va_arg(param_detail, int (*)(void *, void *));
 		} else if (param[find_p + 1] == 'n') {
-			new_trie->next = va_arg(param_detail, void (*)(void *));
+			new_trie->next = va_arg(param_detail, void *(*)(void *));
 		}
 	}
 
-	if (weight_param.weight_option && !weight_param.simple_weight) // default action
-		weight_param.simple_weight = default_weight;
+	if (weight_scheme.weight_option && !weight_scheme.simple_weight) // default action
+		weight_scheme.simple_weight = default_weight;
 	if (!new_trie->next) // default
 		new_trie->next = default_next;
+
+	new_trie->weight_obj = weight_scheme;
 
 	// return updated new_trie
 	return new_trie;
@@ -172,11 +186,19 @@ int match(int test1, int test2) {
 // 0 for insert left
 int inject_node(node_t *curr_node, node_t *new_node, int dir) {
 	node_t *curr_next_node = pull_next(curr_node, dir);
-	dir ? curr_node->next : curr_node->prev = new_node;
-	dir ? new_node->prev : curr_node->next = curr_node;
+	if (dir) {
+		curr_node->next = new_node;
+		new_node->prev = curr_node;
 
-	dir ? curr_next_node->prev : curr_next_node->next = new_node;
-	dir ? new_node->next : new_node->prev = curr_next_node;
+		curr_next_node->prev = new_node;
+		new_node->next = curr_next_node;
+	} else {
+		curr_node->prev = new_node;
+		curr_node->next = curr_node;
+
+		curr_next_node->next = new_node;
+		new_node->prev = curr_next_node;
+	}
 
 	return 0;
 }
@@ -194,7 +216,7 @@ int trie_insertMETA(node_t *curr_node, trie_t *meta_func, void *value) {
 		// check current position to see if we have found a position to insert
 		weight_ret = meta_func->weight(meta_func->weight_obj, value, curr_node->payload);
 
-		if (match(weight_ret > 0 && search_direction) || match(weight_ret < 0 && !search_direction)) // keep moving in a direction
+		if (match(weight_ret > 0, search_direction) || match(weight_ret < 0, !search_direction)) // keep moving in a direction
 			curr_node = search_direction ? curr_node->next : curr_node->prev;
 		else
 			break;
@@ -211,7 +233,7 @@ int trie_insertMETA(node_t *curr_node, trie_t *meta_func, void *value) {
 
 	void *get_next_value = meta_func->next(value);
 
-	if (!value) {
+	if (!get_next_value) {
 		curr_node->end_weight += 1;
 		return 0;
 	}
@@ -221,7 +243,8 @@ int trie_insertMETA(node_t *curr_node, trie_t *meta_func, void *value) {
 	// check for existence of child
 	// if no child, need to build one bfore recurring
 	if (!curr_node->children)
-		curr_node->children = node_construct(get_next_value);
+		curr_node->children = node_construct(meta_func->weight_obj.weight_option ?
+			singleton_maker(get_next_value) : get_next_value);
 
 	// recur
 	return trie_insertMETA(curr_node->children, meta_func, get_next_value);
@@ -229,40 +252,13 @@ int trie_insertMETA(node_t *curr_node, trie_t *meta_func, void *value) {
 
 // the value that comes after trie depends on weight_option
 // either void * for weight_option = 0 or char for weight_option = 1
-int trie_insert(trie_t *trie, ...) {
-	va_list get_value;
-	va_start(get_value, trie);
-
-	char *p_value = malloc(sizeof(char) * 2);
-
-	p_value = va_arg(get_value, void *);
-
+int trie_insert(trie_t *trie, void *p_value) {
 	if (!trie->root_node)
-		trie->root_node = insert_node;
-	else
-		trie_insertMETA(trie->root_node, trie->weight_obj, trie->next, insert_node);
+		trie->root_node = node_construct(singleton_maker(p_value));
 
-	return 0;
+	return trie_insertMETA(trie->root_node, trie, p_value);
 }
 
-/*
-	Destruct takes in the Trie *trie HEAD and DFS through to
-	free all of the allocated heap memory
+int destruct(trie_t *trie) {
 
-	After this function the trie will be fully empty (including the head)
-*/
-int destruct(Trie *trie) {
-
-	if (!trie->childCount) {
-		free(trie);
-		return 0;
-	}
-
-	for (int i = 0; i < 26; i++) {
-		if (trie->children[i])
-			destruct(trie->children[i]);
-	}
-
-	free(trie);
-	return 0;
 }
