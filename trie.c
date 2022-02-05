@@ -51,8 +51,6 @@ typedef struct TrieNode {
 void node_destroy(void *void_node) {
 	node_t *node = (node_t *) void_node;
 
-	printf("delete known %s\n", (char *) node->payload);
-
 	if (node->children)
 		deepdestroy__hashmap(node->children);
 
@@ -136,14 +134,17 @@ trie_t *trie_create(char *param, ...) {
 
 	// check for other parameters
 	for (find_p = 0; param[find_p + 1]; find_p++) {
-		if (param[find_p] != '-' || param[find_p] != ' ')
+		if (param[find_p] != '-')
 			continue;
 
 		if (param[find_p + 1] == 'n') {
+			printf("add next");
 			new_trie->next = va_arg(param_detail, void *(*)(void *));
 		} else if (param[find_p + 1] == 'c') {
+			printf("add compare");
 			new_trie->comparer = va_arg(param_detail, int (*)(void *, void *));
 		} else if (param[find_p + 1] == 'd') {
+			printf("add delete");
 			new_trie->delete = va_arg(param_detail, int (*)(void *));
 		}
 	}
@@ -159,19 +160,20 @@ int trie_insert_helper(hashmap *curr_node, trie_t *trie_meta_data, void *value) 
 	void *get_next_value = trie_meta_data->next(value);
 
 	if (get_next_value && sub_node) {
+		if (build_alloc_char)
+			free(build_alloc_char);
+
 		sub_node->thru_weight++;
-	} else if (get_next_value) {
-		// build a new child
-		sub_node = node_construct(build_alloc_char ? build_alloc_char : value, trie_meta_data->delete);
-		insert__hashmap(curr_node, build_alloc_char ? build_alloc_char : value, sub_node, "", trie_meta_data->comparer, NULL);
 	} else {
 		if (!sub_node) {
 			sub_node = node_construct(build_alloc_char ? build_alloc_char : value, trie_meta_data->delete);
 			insert__hashmap(curr_node, build_alloc_char ? build_alloc_char : value, sub_node, "", trie_meta_data->comparer, NULL);
-		}
+		} else
+			free(build_alloc_char);
 
 		sub_node->end_weight++;
-		return 0;
+		if (!get_next_value)
+			return 0;
 	}
 
 	return trie_insert_helper(sub_node->children, trie_meta_data, get_next_value);

@@ -29,6 +29,7 @@ int (*)(void *, void *);
 ```C
 void *(*)(void *);
 ```
+The next function requires a way to return `NULL` when the end of the value is reached. So if an `int **` is used, the final position should have some way of recognizing a terminator and stopping the continuation.
 
 4. `-d`: A delete function. This goes through the trie and deletes all payloads at every level. This has the form:
 ```C

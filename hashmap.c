@@ -149,6 +149,7 @@ int re__hashmap(hashmap *hash__m) {
 
 int METAinsert__hashmap(hashmap *hash__m, vtableKeyStore key, void *value) {
 	int mapPos = hash(key.key) % hash__m->hashmap__size;
+	printf("pos %d\n", mapPos);
 	int bucketLength = 0; // counts size of the bucket at mapPos
 
 	// see if there is already a bucket defined at mapPos
