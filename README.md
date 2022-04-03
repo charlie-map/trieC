@@ -70,3 +70,4 @@ int trie_destroy(trie_t *trie);
 
 # Future Updates
 Currently no future enhancements are planned.
+***More testing is required (certain aspectes of test.c are not fully laid out yet)***
